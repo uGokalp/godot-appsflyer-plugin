@@ -20,7 +20,7 @@ const _RELAYED_SIGNALS: Array[StringName] = [
 var _plugin: Object
 
 
-func _ready() -> void:
+func _init() -> void:
 	if Engine.has_singleton(SINGLETON_NAME):
 		bind_plugin(Engine.get_singleton(SINGLETON_NAME))
 	elif OS.has_feature("editor"):
@@ -56,7 +56,7 @@ static func normalize_host(domain: String) -> String:
 	var scheme_end := host.find("://")
 	if scheme_end != -1:
 		host = host.substr(scheme_end + 3)
-	return host.get_slice("/", 0)
+	return host.get_slice("/", 0).get_slice("?", 0).get_slice("#", 0).get_slice(":", 0)
 
 
 ## Branded hosts the SDK must resolve itself; `*.onelink.me` hosts need no registration.

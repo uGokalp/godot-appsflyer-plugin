@@ -33,9 +33,24 @@ func test_onelink_custom_domains_are_bare_branded_hosts() -> void:
 	var domains := PackedStringArray([
 		" https://go.example.com/promo?x=1 ", "applinks:links.example.org", "http://Brand.example.net",
 		"game.onelink.me", "https://game.onelink.me/abc", "onelink.me", "notonelink.me", "", "   ",
+		"https://query.example.com?pid=campaign", "https://fragment.example.com#promo", "https://port.example.com:443/path",
 	])
 
-	check_eq(Facade.onelink_custom_domains(domains), PackedStringArray(["go.example.com", "links.example.org", "Brand.example.net", "notonelink.me"]), "custom domains")
+	check_eq(Facade.onelink_custom_domains(domains), PackedStringArray(["go.example.com", "links.example.org", "Brand.example.net", "notonelink.me", "query.example.com", "fragment.example.com", "port.example.com"]), "custom domains")
+
+
+func test_native_is_bound_before_facade_enters_tree() -> void:
+	var native := FakeNativePlugin.new()
+	Engine.register_singleton(Facade.SINGLETON_NAME, native)
+	var facade := Facade.new()
+	var received: Array = []
+	facade.conversion_data_received.connect(func(data: Dictionary) -> void: received.append(data))
+	facade.init("key", "123")
+	native.conversion_data_received.emit({"af_status": "Organic"})
+	check_eq(native.calls, [["init", "key", "123", PackedStringArray()]], "initialization from an earlier autoload")
+	check_eq(received, [{"af_status": "Organic"}], "signals before entering the tree")
+	facade.free()
+	Engine.unregister_singleton(Facade.SINGLETON_NAME)
 
 
 func test_init_rejects_missing_key_or_non_numeric_app_id() -> void:

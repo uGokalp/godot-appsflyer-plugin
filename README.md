@@ -36,7 +36,7 @@ The script needs Xcode, and it needs `scons` the first time (for the generated G
 
 The `.gdip` links `AppsFlyerLib` onto the app target, copies the privacy bundle into the app, and names the system frameworks. No project patching is needed for linking.
 
-To use the plugin in a game, copy `addons/appsflyer/` and `ios/plugins/appsflyer/` into the project. Enable the AppsFlyer editor plugin, which registers the `AppsFlyer` autoload. Then tick **AppsFlyerGodotPlugin** under Export → iOS → Plugins.
+To use the plugin in a game, copy `addons/appsflyer/` and `ios/plugins/appsflyer/` into the project. Enable the AppsFlyer editor plugin, which registers the `AppsFlyer` autoload. Then tick **AppsFlyerGodotPlugin** under Export → iOS → Plugins. The facade binds during construction, so earlier autoloads can initialize it from `_ready()`.
 
 ## Configure
 
@@ -47,7 +47,7 @@ Project settings under `appsflyer/config/`:
 | `dev_key` | AppsFlyer dev key. Used when `init()` gets no argument. |
 | `apple_app_id` | Numeric App Store id. An `id` prefix is stripped. |
 | `att_usage_description` | Written as `NSUserTrackingUsageDescription`. If it is empty, the key is not written and `request_tracking_authorization()` refuses to prompt instead of crashing. If the preset's `application/additional_plist_content` already has the key, the preset wins and the export warns. The same applies to `SKAdNetworkItems`. |
-| `onelink_domains` | OneLink hosts. `go.example.com`, `https://go.example.com/path` and `applinks:go.example.com` are all accepted. They are added as `applinks:` associated domains to the exported `.entitlements`. If the preset's `entitlements/additional` already defines associated domains, this setting is ignored with a warning. Godot runs the entitlements hook only in macOS editors; on other hosts the export prints the block to paste into `entitlements/additional`. Branded hosts (anything not ending in `onelink.me`) are also passed to the SDK as `oneLinkCustomDomains` by `init()`. |
+| `onelink_domains` | OneLink hosts. `go.example.com`, `https://go.example.com/path` and `applinks:go.example.com` are all accepted. They are added as `applinks:` associated domains to the exported `.entitlements`. If the preset's `entitlements/additional` already defines associated domains, this setting is ignored with a warning. Godot runs the entitlements hook only in macOS editors; on other hosts the export prints the block to paste into `entitlements/additional`. URL paths, queries, fragments and ports are removed. Branded hosts (anything not ending in `onelink.me`) are also passed to the SDK as `oneLinkCustomDomains` by `init()`. |
 | `skadnetwork_ids` | Optional `SKAdNetworkItems`. Empty by default. Copy the list from the AppsFlyer dashboard and do not guess it. |
 
 ## Use
@@ -68,7 +68,7 @@ func _ready() -> void:
 | --- | --- |
 | `init(dev_key := "", apple_app_id := "")` | Calls `initWithDevKey:appleAppId:`, sets `oneLinkCustomDomains`, and installs the delegates and the session-ready listener. It does not start a session. |
 | `start()` | Lets the session start. The native side calls the SDK's `start` once per foreground cycle when the SDK reports ready and no ATT answer is pending. |
-| `request_tracking_authorization(timeout_sec := 0.0) -> bool` | Shows the ATT prompt and returns `false` if it cannot (no usage description, or off iOS). Until the answer arrives, or the timeout when one is given, no session starts, including sessions after a background/foreground cycle. The prompt is deferred until the app is active, one main-queue turn after activation. If iOS answers "not determined" (the prompt was suppressed), it is retried once on the next activation. If the retry is also suppressed, the session starts without an answer, so it is never withheld for good. |
+| `request_tracking_authorization(timeout_sec := 0.0) -> bool` | Shows the ATT prompt and returns `false` if it cannot (no usage description, or off iOS). Until the answer arrives, or the timeout when one is given, no session starts, including sessions after a background/foreground cycle. The prompt is deferred until the app is active, one main-queue turn after activation. If iOS answers "not determined" (the prompt was suppressed), it is retried once on the next activation or after one second if already active. If still inactive after one second, or if the retry is also suppressed, the gate stops waiting for consent. A visible retry prompt still waits for the answer or the caller’s timeout. |
 | `get_att_status() -> int` | Reads the status without prompting. Returns `-1` off iOS. |
 | `set_customer_user_id(id)`, `set_debug(enabled)`, `disable_skan(disabled)` | These may be called before `init()`. The values are applied when the SDK is initialized. |
 | `log_event(name, params := {})` | Params keep their types. Use a float for `af_revenue`. |
@@ -104,7 +104,7 @@ The headless suite runs the facade against a fake native object. It covers the s
 platforms/ios/scripts/test.sh
 ```
 
-This compiles and runs the start-gate unit test on the host with `clang++`. It covers start with and without ATT, timeouts, stale timeouts, the single retry of a suppressed prompt, once-per-foreground starts, background resets, and an ATT request made after a session already started.
+This compiles and runs the start-gate unit test on the host with `clang++`. It covers start with and without ATT, timeouts, stale timeouts, the single retry of a suppressed prompt, its bounded activation wait and stale callbacks, once-per-foreground starts, background resets, and an ATT request made after a session already started.
 
 Each test was checked by mutating the code under test and confirming that the test fails.
 
@@ -122,4 +122,5 @@ Run these on a real device with a debug build, `set_debug(true)`, and the AppsFl
 6. Cold OneLink: kill the app, then tap a link. The scene lifecycle delivers the link through `scene:willConnectToSession:options:`. The bridge passes it to `handleLaunchOptions:` and `continueUserActivity:` before the listener is registered. `deep_link_received` reports `found` once, and the SDK log shows the launch sent after the link resolved.
 7. Branded domain: repeat 5 and 6 with a link on a custom OneLink domain.
 8. Deferred deep link: install from a link, then launch. `deep_link_received` reports `is_deferred` true.
-9. Events: `log_event` emits `event_logged` with `success` true, and the event shows in the dashboard.
+9. Suppressed ATT with zero timeout: overlap another permission request with ATT, and keep the app active. Confirm the retry occurs without needing another background/foreground cycle; one launch follows its answer (or its suppression). Repeat with the app inactive through the one-second retry deadline, then foreground: measurement must resume.
+10. Events: `log_event` emits `event_logged` with `success` true, and the event shows in the dashboard.

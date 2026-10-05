@@ -137,8 +137,19 @@ class AppsFlyerGodotPlugin : public Object {
 				if (status == ATTrackingManagerAuthorizationStatusNotDetermined) {
 					// The prompt was suppressed (app inactive or another permission dialog showing).
 					if (plugin->gate.retry_undetermined_consent(p_generation)) {
-						when_next_active(^{
-							request_att(p_generation);
+						dispatch_block_t retry = ^{
+							if (singleton && singleton->gate.begin_consent_retry(p_generation)) {
+								request_att(p_generation);
+							}
+						};
+						when_next_active(retry);
+						// Activation may have already happened before the completion reached main.
+						dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+							if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
+								retry();
+							} else if (singleton) {
+								start_if(singleton->gate.expire_consent_retry(p_generation));
+							}
 						});
 					} else {
 						start_if(plugin->gate.resolve_consent(p_generation));

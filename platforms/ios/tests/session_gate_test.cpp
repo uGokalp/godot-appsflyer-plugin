@@ -141,6 +141,47 @@ static void att_sheet_dismissal_does_not_start_a_second_session() {
 	CHECK(!gate.on_session_ready());
 }
 
+static void suppressed_retry_expires_without_activation() {
+	SessionGate gate;
+	uint64_t generation = gate.begin_consent();
+	gate.request_start();
+	gate.on_session_ready();
+	CHECK(gate.retry_undetermined_consent(generation));
+	CHECK(gate.expire_consent_retry(generation));
+	CHECK(!gate.begin_consent_retry(generation));
+	CHECK(!gate.expire_consent_retry(generation));
+}
+
+static void activation_and_fallback_only_prompt_once_and_keep_waiting_for_answer() {
+	SessionGate gate;
+	uint64_t generation = gate.begin_consent();
+	gate.request_start();
+	gate.on_session_ready();
+	CHECK(gate.retry_undetermined_consent(generation));
+	CHECK(gate.begin_consent_retry(generation));
+	CHECK(!gate.begin_consent_retry(generation));
+	CHECK(!gate.expire_consent_retry(generation));
+	CHECK(!gate.request_start());
+	CHECK(gate.resolve_consent(generation));
+}
+
+static void stale_retry_cannot_prompt_or_release_a_new_request() {
+	SessionGate gate;
+	uint64_t first = gate.begin_consent();
+	gate.request_start();
+	gate.on_session_ready();
+	CHECK(gate.retry_undetermined_consent(first));
+	CHECK(gate.resolve_consent(first));
+	gate.on_background();
+	uint64_t second = gate.begin_consent();
+	gate.on_session_ready();
+	CHECK(!gate.begin_consent_retry(second));
+	CHECK(gate.retry_undetermined_consent(second));
+	CHECK(!gate.begin_consent_retry(first));
+	CHECK(!gate.expire_consent_retry(first));
+	CHECK(gate.expire_consent_retry(second));
+}
+
 int main() {
 	start_without_consent();
 	start_requested_after_session_ready();
@@ -156,6 +197,9 @@ int main() {
 	session_ready_again_in_the_same_foreground_does_not_restart();
 	session_ready_after_background_starts_again();
 	att_sheet_dismissal_does_not_start_a_second_session();
+	suppressed_retry_expires_without_activation();
+	activation_and_fallback_only_prompt_once_and_keep_waiting_for_answer();
+	stale_retry_cannot_prompt_or_release_a_new_request();
 	if (failures) {
 		std::fprintf(stderr, "%d check(s) failed\n", failures);
 		return 1;

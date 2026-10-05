@@ -66,7 +66,7 @@ func test_skadnetwork_ids_are_normalized_items() -> void:
 
 
 func test_associated_domains_are_inserted_inside_root_dict() -> void:
-	var patched := ExportPlugin.add_associated_domains(ENTITLEMENTS, PackedStringArray(["https://game.onelink.me/AbCd", "applinks:go.example.com", " http://links.example.org/path?q=1 ", "  "]))
+	var patched := ExportPlugin.add_associated_domains(ENTITLEMENTS, PackedStringArray(["https://game.onelink.me?pid=test", "applinks:go.example.com", " http://links.example.org:443#promo ", "  "]))
 
 	check_eq(_root_values(patched, "com.apple.developer.associated-domains"), PackedStringArray(["applinks:game.onelink.me", "applinks:go.example.com", "applinks:links.example.org"]), "domains")
 	check_eq(_root_values(patched, "aps-environment"), PackedStringArray(["development"]), "existing entitlement")
