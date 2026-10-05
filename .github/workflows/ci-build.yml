@@ -1,0 +1,87 @@
+name: "[CI] Build"
+
+# Smoke-test the plugin on every push and pull request. This mirrors the release
+# build but does not sign or publish anything. No secrets are required, so it
+# also runs on pull requests from forks. Android is phase 2 and has no job.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  GODOT_VERSION: "4.7.2"
+
+concurrency:
+  group: ci-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang unzip \
+            libfontconfig1 libxcursor1 libxinerama1 libxrandr2 libxi6 libgl1 libxext6 libxrender1
+
+      - name: Run session-gate tests
+        run: bash platforms/ios/scripts/test.sh
+
+      - name: Install Godot
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/godot.zip \
+            "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          bin="$(find /tmp/godot -type f -name 'Godot_*' -print -quit)"
+          sudo install -m 755 "$bin" /usr/local/bin/godot
+
+      - name: Run GDScript tests
+        run: |
+          godot --headless --path platforms/godot_editor --import
+          godot --headless --path platforms/godot_editor -s res://tests/run.gd
+
+  build-ios:
+    name: Build iOS
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install SCons
+        run: python3 -m pip install scons
+
+      - name: Cache Godot headers
+        uses: actions/cache@v4
+        with:
+          path: platforms/ios/include
+          key: godot-headers-${{ env.GODOT_VERSION }}-${{ hashFiles('platforms/ios/scripts/fetch_godot_headers.sh') }}
+
+      - name: Cache AppsFlyer SDK
+        uses: actions/cache@v4
+        with:
+          path: platforms/ios/vendor
+          key: appsflyer-sdk-${{ hashFiles('platforms/ios/scripts/fetch_appsflyer_sdk.sh') }}
+
+      - name: Build iOS plugin
+        run: bash platforms/ios/scripts/build.sh
+
+      - name: Upload iOS binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-binaries
+          path: platforms/godot_editor/ios/plugins/appsflyer/
+          if-no-files-found: error
+          retention-days: 3

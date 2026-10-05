@@ -56,6 +56,12 @@ The script needs Xcode, and it needs `scons` the first time (for the generated G
 
 The `.gdip` links `AppsFlyerLib` onto the app target, copies the privacy bundle into the app, and names the system frameworks. No project patching is needed for linking.
 
+## Release
+
+Push a tag `vX.Y.Z` that matches `version` in `platforms/godot_editor/addons/appsflyer/plugin.cfg`. The release workflow reruns the tests, rebuilds the iOS binaries, and publishes `godot-appsflyer-plugin-vX.Y.Z.zip`. The zip contains `addons/appsflyer` and `ios/plugins/appsflyer`. Extract it into the root of a Godot project.
+
+Pushes to `main` and pull requests run the same tests and iOS build.
+
 To use the plugin in a game, copy `addons/appsflyer/` and `ios/plugins/appsflyer/` into the project. Enable the AppsFlyer editor plugin, which registers the `AppsFlyer` autoload. Then tick **AppsFlyerGodotPlugin** under Export → iOS → Plugins. The facade binds during construction, so earlier autoloads can initialize it from `_ready()`.
 
 ## Configure

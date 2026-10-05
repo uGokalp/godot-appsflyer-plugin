@@ -1,0 +1,144 @@
+name: "[CD] Build and Release"
+
+# Rebuild the iOS plugin and publish a GitHub Release. The tag must match
+# `version` in platforms/godot_editor/addons/appsflyer/plugin.cfg (v0.1.0 for
+# version 0.1.0). workflow_dispatch publishes that plugin.cfg version from the
+# selected ref.
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: cd-release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  GODOT_VERSION: "4.7.2"
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install test tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang unzip \
+            libfontconfig1 libxcursor1 libxinerama1 libxrandr2 libxi6 libgl1 libxext6 libxrender1
+
+      - name: Run session-gate tests
+        run: bash platforms/ios/scripts/test.sh
+
+      - name: Install Godot
+        run: |
+          set -euo pipefail
+          curl -fsSL -o /tmp/godot.zip \
+            "https://github.com/godotengine/godot-builds/releases/download/${GODOT_VERSION}-stable/Godot_v${GODOT_VERSION}-stable_linux.x86_64.zip"
+          unzip -q /tmp/godot.zip -d /tmp/godot
+          bin="$(find /tmp/godot -type f -name 'Godot_*' -print -quit)"
+          sudo install -m 755 "$bin" /usr/local/bin/godot
+
+      - name: Run GDScript tests
+        run: |
+          godot --headless --path platforms/godot_editor --import
+          godot --headless --path platforms/godot_editor -s res://tests/run.gd
+
+  build-ios:
+    name: Build iOS Binaries
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set up Python 3
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install SCons
+        run: python3 -m pip install scons
+
+      - name: Cache Godot headers
+        uses: actions/cache@v4
+        with:
+          path: platforms/ios/include
+          key: godot-headers-${{ env.GODOT_VERSION }}-${{ hashFiles('platforms/ios/scripts/fetch_godot_headers.sh') }}
+
+      - name: Cache AppsFlyer SDK
+        uses: actions/cache@v4
+        with:
+          path: platforms/ios/vendor
+          key: appsflyer-sdk-${{ hashFiles('platforms/ios/scripts/fetch_appsflyer_sdk.sh') }}
+
+      - name: Build iOS plugin
+        run: bash platforms/ios/scripts/build.sh
+
+      - name: Upload iOS binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-binaries
+          path: platforms/godot_editor/ios/plugins/appsflyer/
+          if-no-files-found: error
+          retention-days: 1
+
+  release-finalize:
+    name: Finalize and Publish Release
+    needs: [test, build-ios]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Set plugin version
+        run: |
+          set -euo pipefail
+          raw="$(grep '^version=' platforms/godot_editor/addons/appsflyer/plugin.cfg | cut -d'"' -f2)"
+          tag="v${raw#v}"
+          if [ "$GITHUB_REF_TYPE" = "tag" ] && [ "$GITHUB_REF_NAME" != "$tag" ]; then
+            echo "Pushed tag ${GITHUB_REF_NAME} does not match plugin.cfg version ${tag}."
+            exit 1
+          fi
+          echo "PLUGIN_TAG=$tag" >> "$GITHUB_ENV"
+
+      - name: Create release packaging directories
+        run: |
+          mkdir -p release-staging/addons/appsflyer
+          mkdir -p release-staging/ios/plugins/appsflyer
+
+      - name: Copy plugin source
+        run: cp -R platforms/godot_editor/addons/appsflyer/. release-staging/addons/appsflyer/
+
+      - name: Download iOS binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: ios-binaries
+          path: release-staging/ios/plugins/appsflyer
+
+      - name: Create release zip
+        run: |
+          set -euo pipefail
+          find release-staging -name '.DS_Store' -delete
+          test -f release-staging/addons/appsflyer/plugin.cfg
+          test -f release-staging/ios/plugins/appsflyer/AppsFlyerGodotPlugin.gdip
+          test -d release-staging/ios/plugins/appsflyer/AppsFlyerGodotPlugin.release.xcframework
+          test -d release-staging/ios/plugins/appsflyer/AppsFlyerLib.xcframework
+          test -f release-staging/ios/plugins/appsflyer/AppsFlyerLib_Privacy.bundle/PrivacyInfo.xcprivacy
+          cd release-staging
+          zip -r "../godot-appsflyer-plugin-${PLUGIN_TAG}.zip" addons ios
+          unzip -l "../godot-appsflyer-plugin-${PLUGIN_TAG}.zip"
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$PLUGIN_TAG" \
+            "godot-appsflyer-plugin-${PLUGIN_TAG}.zip" \
+            --title "$PLUGIN_TAG" \
+            --generate-notes
