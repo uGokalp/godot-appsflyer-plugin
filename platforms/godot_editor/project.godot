@@ -1,0 +1,43 @@
+; Engine configuration file.
+; It's best edited using the editor UI and not directly,
+; since the parameters that go here are not all obvious.
+;
+; Format:
+;   [section] ; section goes between []
+;   param=value ; assign values to parameters
+
+config_version=5
+
+[application]
+
+config/name="AppsFlyer Godot Demo"
+run/main_scene="res://main.tscn"
+config/features=PackedStringArray("4.7", "Mobile")
+config/icon="res://icon.svg"
+
+[appsflyer]
+
+config/dev_key=""
+config/apple_app_id=""
+config/att_usage_description="Your data will be used to measure ad performance."
+config/onelink_domains=PackedStringArray()
+config/skadnetwork_ids=PackedStringArray()
+
+[autoload]
+
+AppsFlyer="*res://addons/appsflyer/appsflyer.gd"
+
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=1280
+window/handheld/orientation=1
+
+[editor_plugins]
+
+enabled=PackedStringArray("res://addons/appsflyer/plugin.cfg")
+
+[rendering]
+
+renderer/rendering_method="mobile"
+textures/vram_compression/import_etc2_astc=true

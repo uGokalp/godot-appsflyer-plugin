@@ -1,0 +1,7 @@
+.godot/
+.DS_Store
+platforms/ios/include/
+platforms/ios/bin/
+platforms/godot_editor/ios/plugins/
+platforms/godot_editor/export_presets.cfg
+platforms/ios/vendor/

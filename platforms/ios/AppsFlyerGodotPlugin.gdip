@@ -1,0 +1,11 @@
+[config]
+name="AppsFlyerGodotPlugin"
+binary="AppsFlyerGodotPlugin.xcframework"
+initialization="init_appsflyer_plugin"
+deinitialization="deinit_appsflyer_plugin"
+
+[dependencies]
+linked=["AppsFlyerLib.xcframework"]
+system=["Security.framework", "SystemConfiguration.framework", "CoreTelephony.framework", "AppTrackingTransparency.framework", "AdSupport.framework", "AdServices.framework"]
+files=["AppsFlyerLib_Privacy.bundle"]
+linker_flags=["-ObjC"]
