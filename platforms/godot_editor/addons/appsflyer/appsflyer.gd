@@ -1,6 +1,6 @@
-extends Node
 ## AppsFlyer facade, registered as the `AppsFlyer` autoload. Only iOS has a native
 ## implementation; every other platform (and the editor) gets harmless defaults.
+extends Node
 
 signal conversion_data_received(data: Dictionary)
 signal conversion_data_failed(error: String)

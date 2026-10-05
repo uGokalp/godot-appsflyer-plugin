@@ -35,10 +35,13 @@ func _end_generate_apple_embedded_project(path: String, _will_build_archive: boo
 	if entitlements.is_empty():
 		push_error("AppsFlyer: cannot read %s; Universal Links will not work." % entitlements_path)
 		return
-	if entitlements.contains(ASSOCIATED_DOMAINS_KEY):
+	if _plist_defines_key(entitlements, ASSOCIATED_DOMAINS_KEY):
 		push_warning("AppsFlyer: associated domains already set in the export preset; appsflyer/config/onelink_domains ignored.")
 		return
 	var file := FileAccess.open(entitlements_path, FileAccess.WRITE)
+	if file == null:
+		push_error("AppsFlyer: cannot write %s; Universal Links will not work." % entitlements_path)
+		return
 	file.store_string(add_associated_domains(entitlements, domains))
 
 
@@ -74,10 +77,26 @@ static func associated_domains_block(domains: PackedStringArray) -> String:
 
 
 static func _already_defined(existing_plist: String, key: String) -> bool:
-	if not existing_plist.contains(key):
+	if not _plist_defines_key(existing_plist, key):
 		return false
 	push_warning("AppsFlyer: %s is already set in the preset's application/additional_plist_content; keeping that value." % key)
 	return true
+
+
+# True when `key` is a `<key>` element. A string value that merely contains the name does not count.
+static func _plist_defines_key(plist: String, key: String) -> bool:
+	var from := 0
+	while true:
+		var open := plist.find("<key>", from)
+		if open == -1:
+			return false
+		var close := plist.find("</key>", open + 5)
+		if close == -1:
+			return false
+		if plist.substr(open + 5, close - open - 5).strip_edges() == key:
+			return true
+		from = close + 6
+	return false
 
 
 static func _setting(key: String, default_value: Variant) -> Variant:

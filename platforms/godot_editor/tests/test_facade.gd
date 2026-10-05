@@ -27,6 +27,7 @@ func test_init_falls_back_to_project_settings_and_strips_id_prefix() -> void:
 	var domains := PackedStringArray(["go.example.com"])
 	check_eq(native.calls, [["init", "settings-key", "123456789", domains], ["init", "arg-key", "42", domains]], "native init calls")
 	facade.free()
+	native.free()
 
 
 func test_onelink_custom_domains_are_bare_branded_hosts() -> void:
@@ -51,16 +52,20 @@ func test_native_is_bound_before_facade_enters_tree() -> void:
 	check_eq(received, [{"af_status": "Organic"}], "signals before entering the tree")
 	facade.free()
 	Engine.unregister_singleton(Facade.SINGLETON_NAME)
+	native.free()
 
 
 func test_init_rejects_missing_key_or_non_numeric_app_id() -> void:
 	var native := FakeNativePlugin.new()
 	var facade := _make_facade(native)
 
+	var printing := silence_errors()
 	facade.init("", "123")
 	facade.init("key", "com.example.game")
+	restore_errors(printing)
 	check_eq(native.calls, [] as Array[Array], "native init calls")
 	facade.free()
+	native.free()
 
 
 func test_native_signals_reach_facade_listeners() -> void:
@@ -80,6 +85,7 @@ func test_native_signals_reach_facade_listeners() -> void:
 	native.event_logged.emit("af_login", false, 40)
 	check_eq(received, [{"af_status": "Organic"}, "timeout", {"status": "found", "deeplink_value": "level_7"}, 2, ["af_login", false, 40]], "relayed signals")
 	facade.free()
+	native.free()
 
 
 func test_without_native_plugin_every_call_is_a_harmless_default() -> void:

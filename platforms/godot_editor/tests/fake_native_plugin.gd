@@ -1,4 +1,4 @@
-extends RefCounted
+extends Object
 
 signal conversion_data_received(data: Dictionary)
 signal conversion_data_failed(error: String)

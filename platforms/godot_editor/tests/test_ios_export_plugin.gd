@@ -79,7 +79,18 @@ func test_blank_domains_leave_entitlements_untouched() -> void:
 
 func test_keys_already_in_preset_plist_are_not_duplicated() -> void:
 	var existing := "<key>NSUserTrackingUsageDescription</key>\n<string>Preset text</string>\n"
+	var printing := silence_errors()
 	var plist := ExportPlugin.build_plist_content("Plugin text", PackedStringArray(["v9wttpbfk9.skadnetwork"]), existing)
+	restore_errors(printing)
 
 	check_eq(_root_values(_plist_document(existing + plist), "NSUserTrackingUsageDescription"), PackedStringArray(["Preset text"]), "ATT description")
 	check_eq(_root_values(_plist_document(existing + plist), "SKAdNetworkItems"), PackedStringArray(["v9wttpbfk9.skadnetwork"]), "identifiers")
+
+
+func test_key_names_inside_string_values_are_still_written() -> void:
+	var existing := "<key>CFBundleDisplayName</key>\n<string>NSUserTrackingUsageDescription SKAdNetworkItems</string>\n"
+	var plist := ExportPlugin.build_plist_content("Plugin text", PackedStringArray(["v9wttpbfk9.skadnetwork"]), existing)
+	var document := _plist_document(existing + plist)
+
+	check_eq(_root_values(document, "NSUserTrackingUsageDescription"), PackedStringArray(["Plugin text"]), "ATT description")
+	check_eq(_root_values(document, "SKAdNetworkItems"), PackedStringArray(["v9wttpbfk9.skadnetwork"]), "identifiers")

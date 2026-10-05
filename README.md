@@ -10,6 +10,26 @@ The editor, desktop exports and Android all no-op. Android support is phase 2 (s
 
 Purchases are out of scope. Revenue goes through RevenueCat's server-side AppsFlyer integration. After `start()`, copy `AppsFlyer.get_appsflyer_id()` onto the RevenueCat customer as `$appsflyerId`. Do not also log `af_purchase`, because that double-counts revenue.
 
+## Status
+
+v1 for iOS works end to end on a real device (iPhone 15 Pro, iOS 26.6.2, AppsFlyer SDK 7.0.2, Godot 4.7.2), with debug and release builds:
+
+| Check | Result |
+| --- | --- |
+| Plugin loads, AppsFlyer id generated | ✅ |
+| ATT prompt with the configured text; the session starts only after the answer; the IDFA reaches AppsFlyer | ✅ |
+| Exactly one session start per foreground, including when the ATT sheet closes | ✅ |
+| `log_event` → `event_logged(name, true, 0)` | ✅ |
+| Conversion data: organic, and non-organic from a OneLink click | ✅ |
+| Unified deep linking: warm, cold (killed app) and deferred (fresh install, `is_deferred: true`) | ✅ |
+| Release archive: release bridge links, `AppsFlyerLib_Privacy.bundle` is inside the `.app` | ✅ |
+
+Not yet verified on a device: ATT timeout and deny paths, branded (non-`onelink.me`) domains, and the suppressed-prompt retry (items 2, 3, 7 and 9 in the device test plan). Android is not implemented.
+
+Size: the bridge xcframework is about 0.5 MB for device and simulator together; only the device slice is linked, and the linker strips unused code. The AppsFlyer SDK is the larger addition. Nothing is added to the `.pck`.
+
+Contributors and agents: see `CLAUDE.md` for the repo layout and conventions, and `docs/platform-notes.md` for the verified Godot, SDK and iOS behavior the code relies on.
+
 ## Pins
 
 | Component | Version | Where |
@@ -112,7 +132,16 @@ The native bridge is checked by exporting the demo and building it with Xcode. T
 
 ### Device test plan
 
-Run these on a real device with a debug build, `set_debug(true)`, and the AppsFlyer dashboard's test device registered.
+Run these on a real device with a debug build, `set_debug(true)`, and the AppsFlyer dashboard's test device registered. Items 1, 4, 5, 6, 8 and 10 have passed (see Status).
+
+Practical notes from the first device pass:
+
+- **Logs.** Godot's `print` and the SDK's debug log go to the unified log, not to stdout, so `xcrun devicectl ... --console` shows nothing useful. Use `pymobiledevice3 syslog live --udid <udid> | grep "<Binary>{<Binary>}"`. Count lines ending in `] Start` to catch duplicate sessions; `[DDL]` lines show deep-link resolution.
+- **Universal Links.** The OneLink template must have Universal Links set with your Team ID and bundle ID. Check `https://<host>/.well-known/apple-app-site-association` lists `<TEAM>.<bundle>`. Apple's CDN can serve an older empty copy for hours. For testing only, change the exported entitlement to `applinks:<host>?mode=developer` and turn on Settings → Developer → Associated Domains Development; the device then fetches the file directly.
+- **Opening links.** Tap links from Notes or Messages. Typing a link into Safari's address bar does not open the app.
+- **New AppsFlyer apps.** While an app is "Pending" in AppsFlyer, the first conversion-data request after install can fail with "App ID is incorrect". It succeeds on the next foreground once the install is recorded.
+- **Deferred deep links** are resolved by the SDK at first launch, before `start()`, so `deep_link_received` can arrive before the ATT answer. That is expected; the session itself still waits.
+- **Release archives.** Godot's release export asks for an "Apple Distribution" identity. For a device-installable test archive, pass `CODE_SIGN_IDENTITY="Apple Development"` to `xcodebuild archive`.
 
 1. Fresh install, ATT prompt: `att_status_received` fires with the answer, then the SDK log shows one launch. Deny once and allow once on separate installs.
 2. ATT timeout: leave the prompt open past the timeout. The session starts after the timeout, and the later answer is still reported.
