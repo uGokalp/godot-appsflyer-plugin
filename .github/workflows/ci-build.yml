@@ -22,6 +22,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -84,4 +85,5 @@ jobs:
           name: ios-binaries
           path: platforms/godot_editor/ios/plugins/appsflyer/
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 3

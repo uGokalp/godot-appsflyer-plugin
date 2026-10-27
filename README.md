@@ -1,6 +1,6 @@
 # Godot AppsFlyer plugin
 
-AppsFlyer iOS SDK 7 for Godot 4.7. The plugin covers attribution, conversion data, unified deep linking, ATT and in-app events. It has three parts:
+AppsFlyer iOS SDK 7 for Godot 4.7. The plugin covers attribution, conversion data, unified deep linking, ATT, GDPR/DMA consent, opt-out, in-app events and ad revenue. It has three parts:
 
 - a static `.gdip` bridge (`platforms/ios`)
 - an `AppsFlyer` autoload, which is the only API game code uses
@@ -24,7 +24,7 @@ v1 for iOS works end to end on a real device (iPhone 15 Pro, iOS 26.6.2, AppsFly
 | Unified deep linking: warm, cold (killed app) and deferred (fresh install, `is_deferred: true`) | ✅ |
 | Release archive: release bridge links, `AppsFlyerLib_Privacy.bundle` is inside the `.app` | ✅ |
 
-Not yet verified on a device: ATT timeout and deny paths, branded (non-`onelink.me`) domains, and the suppressed-prompt retry (items 2, 3, 7 and 9 in the device test plan). Android is not implemented.
+Not yet verified on a device: ATT timeout and deny paths, branded (non-`onelink.me`) domains, the suppressed-prompt retry, consent, opt-out, ad revenue and SKAN/AdAttributionKit postback copies (items 2, 3, 7, 9, 11, 12 and 13 in the device test plan). Android is not implemented.
 
 Size: the bridge xcframework is about 0.5 MB for device and simulator together; only the device slice is linked, and the linker strips unused code. The AppsFlyer SDK is the larger addition. Nothing is added to the `.pck`.
 
@@ -73,8 +73,9 @@ Project settings under `appsflyer/config/`:
 | `dev_key` | AppsFlyer dev key. Used when `init()` gets no argument. |
 | `apple_app_id` | Numeric App Store id. An `id` prefix is stripped. |
 | `att_usage_description` | Written as `NSUserTrackingUsageDescription`. If it is empty, the key is not written and `request_tracking_authorization()` refuses to prompt instead of crashing. If the preset's `application/additional_plist_content` already has the key, the preset wins and the export warns. The same applies to `SKAdNetworkItems`. |
-| `onelink_domains` | OneLink hosts. `go.example.com`, `https://go.example.com/path` and `applinks:go.example.com` are all accepted. They are added as `applinks:` associated domains to the exported `.entitlements`. If the preset's `entitlements/additional` already defines associated domains, this setting is ignored with a warning. Godot runs the entitlements hook only in macOS editors; on other hosts the export prints the block to paste into `entitlements/additional`. URL paths, queries, fragments and ports are removed. Branded hosts (anything not ending in `onelink.me`) are also passed to the SDK as `oneLinkCustomDomains` by `init()`. |
-| `skadnetwork_ids` | Optional `SKAdNetworkItems`. Empty by default. Copy the list from the AppsFlyer dashboard and do not guess it. |
+| `onelink_domains` | OneLink hosts. `go.example.com`, `https://go.example.com/path` and `applinks:go.example.com` are all accepted. They are added as `applinks:` associated domains to the exported `.entitlements`. If the preset's `entitlements/additional` already defines associated domains, this setting is ignored with a warning. Godot runs the entitlements hook only in macOS editors; on other hosts the export prints the block to paste into `entitlements/additional`. URL paths, queries, fragments and ports are removed. Hosts are lowercased. Branded hosts (anything not ending in `onelink.me`, and not a `*.` wildcard, which only the entitlement understands) are also passed to the SDK as `oneLinkCustomDomains` by `init()`. |
+| `skadnetwork_ids` | Optional `SKAdNetworkItems`. Empty by default. Copy the list from the AppsFlyer dashboard and do not guess it. Blank rows are skipped. |
+| `skan_postback_copies` | On by default. Writes `NSAdvertisingAttributionReportEndpoint` and `AdAttributionKit` → `AttributionCopyEndpoint`, both `https://appsflyer-skadnetwork.com/`, so Apple sends AppsFlyer a copy of winning SKAN and AdAttributionKit postbacks. Keys already in the preset win. |
 
 ## Use
 
@@ -85,6 +86,7 @@ func _ready() -> void:
 
 	AppsFlyer.set_debug(OS.is_debug_build())
 	AppsFlyer.set_customer_user_id(user_id)          # optional, before start()
+	AppsFlyer.set_consent(true, data_ok, ads_ok, storage_ok)  # EEA/UK/CH users, every launch, before start()
 	AppsFlyer.init()                                 # project settings, or init(dev_key, apple_app_id)
 	AppsFlyer.request_tracking_authorization(60.0)   # optional; start() waits for the answer or 60 s
 	AppsFlyer.start()
@@ -94,10 +96,15 @@ func _ready() -> void:
 | --- | --- |
 | `init(dev_key := "", apple_app_id := "")` | Calls `initWithDevKey:appleAppId:`, sets `oneLinkCustomDomains`, and installs the delegates and the session-ready listener. It does not start a session. |
 | `start()` | Lets the session start. The native side calls the SDK's `start` once per foreground cycle when the SDK reports ready and no ATT answer is pending. |
-| `request_tracking_authorization(timeout_sec := 0.0) -> bool` | Shows the ATT prompt and returns `false` if it cannot (no usage description, or off iOS). Until the answer arrives, or the timeout when one is given, no session starts, including sessions after a background/foreground cycle. The prompt is deferred until the app is active, one main-queue turn after activation. If iOS answers "not determined" (the prompt was suppressed), it is retried once on the next activation or after one second if already active. If still inactive after one second, or if the retry is also suppressed, the gate stops waiting for consent. A visible retry prompt still waits for the answer or the caller’s timeout. |
+| `request_tracking_authorization(timeout_sec := 0.0) -> bool` | Shows the ATT prompt and returns `false` if it cannot (no usage description, or off iOS). Until the answer arrives, or the timeout when one is given, no session starts, including sessions after a background/foreground cycle. The prompt is deferred until the app is active, one main-queue turn after activation. If iOS answers "not determined" (the prompt was suppressed, usually by another permission alert), it is retried once: after one second if the app is active by then, otherwise on the next activation, so the sheet appears once the other alert closes. If the retry is also suppressed, the gate stops waiting for consent. The retry still waits for the answer or the caller’s timeout. |
 | `get_att_status() -> int` | Reads the status without prompting. Returns `-1` off iOS. |
-| `set_customer_user_id(id)`, `set_debug(enabled)`, `disable_skan(disabled)` | These may be called before `init()`. The values are applied when the SDK is initialized. |
-| `log_event(name, params := {})` | Params keep their types. Use a float for `af_revenue`. |
+| `set_customer_user_id(id)`, `set_debug(enabled)`, `disable_skan(disabled)` | These, and the consent and opt-out calls, may be called before `init()`. The values are applied when the SDK is initialized. |
+| `set_consent(subject_to_gdpr, data_usage = null, ads_personalization = null, ad_storage = null)` | GDPR/DMA consent (`setConsentData:`). Google requires it for EEA users. The SDK does not persist it, so call it on every launch before `start()`, and again when the user changes their choice. Users outside GDPR scope: `set_consent(false)`. `null` means unknown. |
+| `enable_tcf_data_collection(enabled)` | Lets the SDK read consent that a TCF v2 CMP stored, instead of `set_consent()`. Use one or the other. |
+| `set_stopped(stopped)`, `is_stopped() -> bool` | Full opt-out: the SDK sends nothing. |
+| `set_anonymize_user(enabled)` | Lighter opt-out: sessions and events are recorded without identifying the user. |
+| `log_event(name, params := {})` | Params keep their types; packed arrays become arrays. NaN and infinity become `null`. Use a float for `af_revenue`. |
+| `log_ad_revenue(monetization_network, mediation_network, currency, revenue, params := {})` | One impression from your ad mediation callback, for example `log_ad_revenue("applovin", AppsFlyer.MediationNetwork.APPLOVIN_MAX, "USD", 0.0021, {"ad_type": "rewarded"})`. Optional `params` keys: `country`, `ad_unit`, `ad_type`, `placement`. IAP revenue still goes through RevenueCat. |
 | `get_appsflyer_id() -> String` | Returns `""` until `init()`. |
 
 | Signal | Arguments |
@@ -124,13 +131,13 @@ The start gate lives in `platforms/ios/src/session_gate.h`, a plain C++ struct w
 godot --headless --path platforms/godot_editor -s res://tests/run.gd
 ```
 
-The headless suite runs the facade against a fake native object. It covers the settings fallback and validation, OneLink host normalization and filtering, signal relays and the no-plugin defaults. It also checks that the plist and entitlements output parses as XML, lands in the root `<dict>`, and does not duplicate keys the preset already sets.
+The headless suite runs the facade against a fake native object that implements every bound method. It covers the settings fallback and validation, forwarding of every call and its arguments, OneLink host normalization and filtering, signal relays and their cleanup, the no-plugin defaults, and that the editor plugin compiles. It also runs the entitlements hook against a temporary exported project. It also checks that the plist and entitlements output parses as XML, lands in the root `<dict>`, and does not duplicate keys the preset already sets.
 
 ```sh
 platforms/ios/scripts/test.sh
 ```
 
-This compiles and runs the start-gate unit test on the host with `clang++`. It covers start with and without ATT, timeouts, stale timeouts, the single retry of a suppressed prompt, its bounded activation wait and stale callbacks, once-per-foreground starts, background resets, and an ATT request made after a session already started.
+This compiles and runs the start-gate unit test on the host with `clang++`. It covers start with and without ATT, timeouts, stale timeouts, the single retry of a suppressed prompt, a timeout cancelling a pending retry, stale callbacks, once-per-foreground starts, background resets, readiness reported after backgrounding, and an ATT request made after a session already started.
 
 Each test was checked by mutating the code under test and confirming that the test fails.
 
@@ -159,3 +166,6 @@ Practical notes from the first device pass:
 8. Deferred deep link: install from a link, then launch. `deep_link_received` reports `is_deferred` true.
 9. Suppressed ATT with zero timeout: overlap another permission request with ATT, and keep the app active. Confirm the retry occurs without needing another background/foreground cycle; one launch follows its answer (or its suppression). Repeat with the app inactive through the one-second retry deadline, then foreground: measurement must resume.
 10. Events: `log_event` emits `event_logged` with `success` true, and the event shows in the dashboard.
+11. Consent: call `set_consent(true, true, true, true)` before `start()`. The launch request carries the consent fields (debug log). Repeat with `set_stopped(true)`: no requests at all.
+12. Ad revenue: `log_ad_revenue(...)` shows in the dashboard's ad revenue report.
+13. Postback copies: the exported `Info.plist` has both endpoint keys and Xcode shows `AdAttributionKit` → "Postback Copy URL".

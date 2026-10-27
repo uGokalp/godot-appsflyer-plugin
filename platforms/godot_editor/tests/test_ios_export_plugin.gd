@@ -94,3 +94,68 @@ func test_key_names_inside_string_values_are_still_written() -> void:
 
 	check_eq(_root_values(document, "NSUserTrackingUsageDescription"), PackedStringArray(["Plugin text"]), "ATT description")
 	check_eq(_root_values(document, "SKAdNetworkItems"), PackedStringArray(["v9wttpbfk9.skadnetwork"]), "identifiers")
+
+
+func test_blank_skadnetwork_ids_are_skipped() -> void:
+	check_eq(ExportPlugin.build_plist_content("", PackedStringArray(["", "  "])), "", "all blank")
+	var plist := ExportPlugin.build_plist_content("", PackedStringArray([" ", "v9wttpbfk9.skadnetwork"]))
+	check_eq(_root_values(_plist_document(plist), "SKAdNetworkItems"), PackedStringArray(["v9wttpbfk9.skadnetwork"]), "identifiers")
+
+
+func test_postback_copies_point_skan_and_adattributionkit_at_appsflyer() -> void:
+	var document := _plist_document(ExportPlugin.build_plist_content("", PackedStringArray(), "", true))
+
+	check_eq(_root_values(document, "NSAdvertisingAttributionReportEndpoint"), PackedStringArray([ExportPlugin.POSTBACK_COPY_URL]), "SKAN endpoint")
+	check_eq(_root_values(document, "AdAttributionKit"), PackedStringArray([ExportPlugin.POSTBACK_COPY_URL]), "AdAttributionKit endpoint")
+	check(document.contains("<key>AttributionCopyEndpoint</key>"), "AdAttributionKit copy key")
+	check_eq(ExportPlugin.build_plist_content("", PackedStringArray(), "", false), "", "disabled")
+
+
+func test_preset_plist_is_respected_by_the_export_hook() -> void:
+	ProjectSettings.set_setting("appsflyer/config/att_usage_description", "Plugin text")
+	ProjectSettings.set_setting("appsflyer/config/skan_postback_copies", true)
+	var existing := "<key>NSUserTrackingUsageDescription</key>\n<string>Preset text</string>\n<key>NSAdvertisingAttributionReportEndpoint</key>\n<string>https://other.example.com/</string>\n"
+	var printing := silence_errors()
+	var document := _plist_document(existing + ExportPlugin.plist_for_preset(existing))
+	restore_errors(printing)
+	ProjectSettings.set_setting("appsflyer/config/att_usage_description", "")
+
+	check_eq(_root_values(document, "NSUserTrackingUsageDescription"), PackedStringArray(["Preset text"]), "ATT description")
+	check_eq(_root_values(document, "NSAdvertisingAttributionReportEndpoint"), PackedStringArray(["https://other.example.com/"]), "SKAN endpoint")
+	check_eq(_root_values(document, "AdAttributionKit"), PackedStringArray([ExportPlugin.POSTBACK_COPY_URL]), "AdAttributionKit endpoint")
+
+
+func _export_project_with_entitlements(entitlements: String) -> String:
+	var root := OS.get_cache_dir().path_join("appsflyer_export_test_%d" % Time.get_ticks_usec())
+	DirAccess.make_dir_recursive_absolute(root.path_join("Game"))
+	var path := root.path_join("Game/Game.entitlements")
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	file.store_string(entitlements)
+	file.close()
+	ProjectSettings.set_setting("appsflyer/config/onelink_domains", PackedStringArray(["go.example.com"]))
+	var printing := silence_errors()
+	ExportPlugin.patch_exported_entitlements(root.path_join("Game.xcodeproj"))
+	restore_errors(printing)
+	ProjectSettings.set_setting("appsflyer/config/onelink_domains", PackedStringArray())
+	var patched := FileAccess.get_file_as_string(path)
+	DirAccess.remove_absolute(path)
+	DirAccess.remove_absolute(root.path_join("Game"))
+	DirAccess.remove_absolute(root)
+	return patched
+
+
+func test_export_hook_adds_domains_to_the_exported_entitlements() -> void:
+	check_eq(_root_values(_export_project_with_entitlements(ENTITLEMENTS), "com.apple.developer.associated-domains"), PackedStringArray(["applinks:go.example.com"]), "domains")
+
+
+func test_export_hook_keeps_associated_domains_from_the_preset() -> void:
+	var preset := ENTITLEMENTS.replace("</dict>", "<key>com.apple.developer.associated-domains</key>\n<array><string>applinks:preset.example.com</string></array>\n</dict>")
+	check_eq(_export_project_with_entitlements(preset), preset, "entitlements")
+
+
+func test_entitlements_without_root_dict_are_left_alone() -> void:
+	var broken := "<plist version=\"1.0\"></plist>"
+	var printing := silence_errors()
+	var patched := ExportPlugin.add_associated_domains(broken, PackedStringArray(["go.example.com"]))
+	restore_errors(printing)
+	check_eq(patched, broken, "entitlements")

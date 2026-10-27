@@ -25,6 +25,7 @@ jobs:
   test:
     name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
@@ -87,6 +88,7 @@ jobs:
           name: ios-binaries
           path: platforms/godot_editor/ios/plugins/appsflyer/
           if-no-files-found: error
+          include-hidden-files: true
           retention-days: 1
 
   release-finalize:
@@ -127,6 +129,7 @@ jobs:
           find release-staging -name '.DS_Store' -delete
           test -f release-staging/addons/appsflyer/plugin.cfg
           test -f release-staging/ios/plugins/appsflyer/AppsFlyerGodotPlugin.gdip
+          test -f release-staging/ios/plugins/appsflyer/.gdignore
           test -d release-staging/ios/plugins/appsflyer/AppsFlyerGodotPlugin.release.xcframework
           test -d release-staging/ios/plugins/appsflyer/AppsFlyerLib.xcframework
           test -f release-staging/ios/plugins/appsflyer/AppsFlyerLib_Privacy.bundle/PrivacyInfo.xcprivacy
@@ -140,5 +143,6 @@ jobs:
         run: |
           gh release create "$PLUGIN_TAG" \
             "godot-appsflyer-plugin-${PLUGIN_TAG}.zip" \
+            --target "$GITHUB_SHA" \
             --title "$PLUGIN_TAG" \
             --generate-notes

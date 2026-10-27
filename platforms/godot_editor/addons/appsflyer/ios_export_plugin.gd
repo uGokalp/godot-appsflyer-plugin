@@ -4,6 +4,7 @@ extends EditorExportPlugin
 const AppsFlyer := preload("res://addons/appsflyer/appsflyer.gd")
 const SETTINGS_PREFIX := "appsflyer/config/"
 const ASSOCIATED_DOMAINS_KEY := "com.apple.developer.associated-domains"
+const POSTBACK_COPY_URL := "https://appsflyer-skadnetwork.com/"
 
 
 func _get_name() -> String:
@@ -14,9 +15,11 @@ func _supports_platform(platform: EditorExportPlatform) -> bool:
 	return platform.get_os_name() == "iOS"
 
 
+# Godot calls _export_begin on every plugin for every platform's export.
 func _export_begin(_features: PackedStringArray, _is_debug: bool, _path: String, _flags: int) -> void:
-	var existing_plist := str(get_option("application/additional_plist_content"))
-	var plist := build_plist_content(_setting("att_usage_description", ""), _setting("skadnetwork_ids", PackedStringArray()), existing_plist)
+	if not _supports_platform(get_export_platform()):
+		return
+	var plist := plist_for_preset(str(get_option("application/additional_plist_content")))
 	if not plist.is_empty():
 		add_apple_embedded_platform_plist_content(plist)
 
@@ -26,6 +29,10 @@ func _export_begin(_features: PackedStringArray, _is_debug: bool, _path: String,
 
 
 func _end_generate_apple_embedded_project(path: String, _will_build_archive: bool) -> void:
+	patch_exported_entitlements(path)
+
+
+static func patch_exported_entitlements(path: String) -> void:
 	var domains: PackedStringArray = _setting("onelink_domains", PackedStringArray())
 	if domains.is_empty():
 		return
@@ -45,15 +52,24 @@ func _end_generate_apple_embedded_project(path: String, _will_build_archive: boo
 	file.store_string(add_associated_domains(entitlements, domains))
 
 
-static func build_plist_content(att_usage_description: String, skadnetwork_ids: PackedStringArray, existing_plist := "") -> String:
+static func plist_for_preset(existing_plist: String) -> String:
+	return build_plist_content(_setting("att_usage_description", ""), _setting("skadnetwork_ids", PackedStringArray()), existing_plist, _setting("skan_postback_copies", true))
+
+
+static func build_plist_content(att_usage_description: String, skadnetwork_ids: PackedStringArray, existing_plist := "", postback_copies := false) -> String:
 	var plist := ""
 	if not att_usage_description.strip_edges().is_empty() and not _already_defined(existing_plist, "NSUserTrackingUsageDescription"):
 		plist += "<key>NSUserTrackingUsageDescription</key>\n<string>%s</string>\n" % att_usage_description.strip_edges().xml_escape()
-	if not skadnetwork_ids.is_empty() and not _already_defined(existing_plist, "SKAdNetworkItems"):
-		plist += "<key>SKAdNetworkItems</key>\n<array>\n"
-		for id in skadnetwork_ids:
-			plist += "<dict><key>SKAdNetworkIdentifier</key><string>%s</string></dict>\n" % id.strip_edges().to_lower().xml_escape()
-		plist += "</array>\n"
+	var items := ""
+	for id in skadnetwork_ids:
+		if not id.strip_edges().is_empty():
+			items += "<dict><key>SKAdNetworkIdentifier</key><string>%s</string></dict>\n" % id.strip_edges().to_lower().xml_escape()
+	if not items.is_empty() and not _already_defined(existing_plist, "SKAdNetworkItems"):
+		plist += "<key>SKAdNetworkItems</key>\n<array>\n%s</array>\n" % items
+	if postback_copies and not _already_defined(existing_plist, "NSAdvertisingAttributionReportEndpoint"):
+		plist += "<key>NSAdvertisingAttributionReportEndpoint</key>\n<string>%s</string>\n" % POSTBACK_COPY_URL
+	if postback_copies and not _already_defined(existing_plist, "AdAttributionKit"):
+		plist += "<key>AdAttributionKit</key>\n<dict><key>AttributionCopyEndpoint</key><string>%s</string></dict>\n" % POSTBACK_COPY_URL
 	return plist
 
 
@@ -62,6 +78,9 @@ static func add_associated_domains(entitlements: String, domains: PackedStringAr
 	if block.is_empty():
 		return entitlements
 	var close := entitlements.rfind("</dict>")
+	if close == -1:
+		push_error("AppsFlyer: the exported entitlements have no root <dict>; Universal Links will not work.")
+		return entitlements
 	return entitlements.substr(0, close) + block + entitlements.substr(close)
 
 

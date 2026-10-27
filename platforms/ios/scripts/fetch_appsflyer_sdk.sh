@@ -20,5 +20,22 @@ xcodebuild -create-xcframework \
 	-framework "$FULL/ios-arm64_x86_64-simulator/AppsFlyerLib.framework" \
 	-output "$VENDOR/AppsFlyerLib.xcframework" >/dev/null
 cp "$WORK/binaries/Resources/nonStrict/PrivacyInfo.xcprivacy" "$VENDOR/AppsFlyerLib_Privacy.bundle/"
+# App Store validation expects every bundle inside the .app to carry an Info.plist.
+cat > "$VENDOR/AppsFlyerLib_Privacy.bundle/Info.plist" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleIdentifier</key>
+	<string>com.appsflyer.AppsFlyerLib-Privacy</string>
+	<key>CFBundleName</key>
+	<string>AppsFlyerLib_Privacy</string>
+	<key>CFBundlePackageType</key>
+	<string>BNDL</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+</dict>
+</plist>
+PLIST
 echo "$AF_VERSION" > "$VENDOR/VERSION"
 echo "AppsFlyerLib $AF_VERSION (static, iOS slices only) -> $VENDOR"

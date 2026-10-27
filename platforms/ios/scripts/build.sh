@@ -10,8 +10,9 @@ DEST="$ROOT/platforms/godot_editor/ios/plugins/appsflyer"
 PRODUCT="AppsFlyerGodotPlugin"
 MIN_IOS="14.0"
 
-[ -d "$HEADERS" ] || "$IOS_DIR/scripts/fetch_godot_headers.sh"
-[ -d "$VENDOR/AppsFlyerLib.xcframework" ] || "$IOS_DIR/scripts/fetch_appsflyer_sdk.sh"
+pinned() { grep -m1 "^$1=" "$IOS_DIR/scripts/$2" | grep -oE '[0-9]+(\.[0-9]+)+'; }
+[ "$(cat "$HEADERS.version" 2>/dev/null)" = "${GODOT_VERSION:-$(pinned GODOT_VERSION fetch_godot_headers.sh)}" ] || "$IOS_DIR/scripts/fetch_godot_headers.sh"
+[ "$(cat "$VENDOR/VERSION" 2>/dev/null)" = "$(pinned AF_VERSION fetch_appsflyer_sdk.sh)" ] || "$IOS_DIR/scripts/fetch_appsflyer_sdk.sh"
 
 compile() {
 	local sdk="$1" slice="$2" defines="$3" output="$4"

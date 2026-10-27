@@ -1,4 +1,5 @@
 #import <AppTrackingTransparency/AppTrackingTransparency.h>
+#import <AppsFlyerLib/AppsFlyerLib-Swift.h>
 #import <AppsFlyerLib/AppsFlyerLib.h>
 #import <UIKit/UIKit.h>
 
@@ -9,8 +10,11 @@
 #include "core/config/engine.h"
 #include "core/object/class_db.h"
 
+#include <cmath>
+
+// Godot strings can hold lone surrogates, which are invalid UTF-8 and make Foundation return nil.
 static NSString *to_ns_string(const String &p_string) {
-	return [NSString stringWithUTF8String:p_string.utf8().get_data()];
+	return [NSString stringWithUTF8String:p_string.utf8().get_data()] ?: @"";
 }
 
 static String to_godot_string(NSString *p_string) {
@@ -30,6 +34,9 @@ static Variant to_variant(id p_value) {
 			return (bool)[p_value boolValue];
 		}
 		if (CFNumberIsFloatType((CFNumberRef)number)) {
+			return [p_value doubleValue];
+		}
+		if (*[p_value objCType] == 'Q' && [p_value unsignedLongLongValue] > INT64_MAX) {
 			return [p_value doubleValue];
 		}
 		return (int64_t)[p_value longLongValue];
@@ -60,8 +67,11 @@ static id to_ns_object(const Variant &p_value) {
 			return @((bool)p_value);
 		case Variant::INT:
 			return @((int64_t)p_value);
-		case Variant::FLOAT:
-			return @((double)p_value);
+		case Variant::FLOAT: {
+			double value = p_value;
+			// JSON has no NaN or infinity; the SDK would fail to serialize the whole payload.
+			return std::isfinite(value) ? @(value) : NSNull.null;
+		}
 		case Variant::DICTIONARY: {
 			Dictionary dictionary = p_value;
 			NSMutableDictionary *result = [NSMutableDictionary dictionaryWithCapacity:dictionary.size()];
@@ -70,7 +80,13 @@ static id to_ns_object(const Variant &p_value) {
 			}
 			return result;
 		}
-		case Variant::ARRAY: {
+		case Variant::ARRAY:
+		case Variant::PACKED_BYTE_ARRAY:
+		case Variant::PACKED_INT32_ARRAY:
+		case Variant::PACKED_INT64_ARRAY:
+		case Variant::PACKED_FLOAT32_ARRAY:
+		case Variant::PACKED_FLOAT64_ARRAY:
+		case Variant::PACKED_STRING_ARRAY: {
 			Array array = p_value;
 			NSMutableArray *result = [NSMutableArray arrayWithCapacity:array.size()];
 			for (const Variant &item : array) {
@@ -96,8 +112,16 @@ class AppsFlyerGodotPlugin : public Object {
 	bool initialized = false;
 	bool debug = false;
 	bool skan_disabled = false;
+	bool stopped = false;
+	bool anonymized = false;
+	bool tcf_collection = false;
+	AppsFlyerConsent *consent = nil;
 	String customer_user_id;
 	SessionGate gate;
+
+	static NSNumber *to_optional_bool(const Variant &p_value) {
+		return p_value.get_type() == Variant::NIL ? nil : @((bool)p_value);
+	}
 
 	static void start_if(bool p_release) {
 		if (p_release) {
@@ -121,6 +145,7 @@ class AppsFlyerGodotPlugin : public Object {
 																			   queue:NSOperationQueue.mainQueue
 																		  usingBlock:^(NSNotification *) {
 																			  [NSNotificationCenter.defaultCenter removeObserver:observer];
+																			  observer = nil;
 																			  dispatch_async(dispatch_get_main_queue(), ^{
 																				  if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
 																					  p_block();
@@ -143,12 +168,11 @@ class AppsFlyerGodotPlugin : public Object {
 							}
 						};
 						when_next_active(retry);
-						// Activation may have already happened before the completion reached main.
+						// Activation may have already happened before the completion reached main. While the app is
+						// still inactive, the dialog that suppressed ATT is up and the next activation retries.
 						dispatch_after(dispatch_time(DISPATCH_TIME_NOW, NSEC_PER_SEC), dispatch_get_main_queue(), ^{
 							if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive) {
 								retry();
-							} else if (singleton) {
-								start_if(singleton->gate.expire_consent_retry(p_generation));
 							}
 						});
 					} else {
@@ -169,6 +193,12 @@ protected:
 		ClassDB::bind_method(D_METHOD("set_customer_user_id", "id"), &AppsFlyerGodotPlugin::set_customer_user_id);
 		ClassDB::bind_method(D_METHOD("set_debug", "enabled"), &AppsFlyerGodotPlugin::set_debug);
 		ClassDB::bind_method(D_METHOD("disable_skan", "disabled"), &AppsFlyerGodotPlugin::disable_skan);
+		ClassDB::bind_method(D_METHOD("set_stopped", "stopped"), &AppsFlyerGodotPlugin::set_stopped);
+		ClassDB::bind_method(D_METHOD("is_stopped"), &AppsFlyerGodotPlugin::is_stopped);
+		ClassDB::bind_method(D_METHOD("set_anonymize_user", "enabled"), &AppsFlyerGodotPlugin::set_anonymize_user);
+		ClassDB::bind_method(D_METHOD("set_consent", "subject_to_gdpr", "data_usage", "ads_personalization", "ad_storage"), &AppsFlyerGodotPlugin::set_consent);
+		ClassDB::bind_method(D_METHOD("enable_tcf_data_collection", "enabled"), &AppsFlyerGodotPlugin::enable_tcf_data_collection);
+		ClassDB::bind_method(D_METHOD("log_ad_revenue", "monetization_network", "mediation_network", "currency", "revenue", "params"), &AppsFlyerGodotPlugin::log_ad_revenue);
 		ClassDB::bind_method(D_METHOD("request_tracking_authorization", "timeout_sec"), &AppsFlyerGodotPlugin::request_tracking_authorization);
 		ClassDB::bind_method(D_METHOD("get_att_status"), &AppsFlyerGodotPlugin::get_att_status);
 		ClassDB::bind_method(D_METHOD("log_event", "name", "params"), &AppsFlyerGodotPlugin::log_event);
@@ -201,6 +231,14 @@ public:
 		[sdk initWithDevKey:to_ns_string(p_dev_key) appleAppId:to_ns_string(p_apple_app_id)];
 		sdk.isDebug = debug;
 		sdk.disableSKAdNetwork = skan_disabled;
+		sdk.isStopped = stopped;
+		sdk.anonymizeUser = anonymized;
+		if (tcf_collection) {
+			[sdk enableTCFDataCollection:YES];
+		}
+		if (consent) {
+			[sdk setConsentData:consent];
+		}
 		if (!customer_user_id.is_empty()) {
 			sdk.customerUserID = to_ns_string(customer_user_id);
 		}
@@ -216,7 +254,7 @@ public:
 		[AppsFlyerGodotService.shared attachToSDK];
 		[sdk registerSessionReadyListener:^{
 			on_main_with_plugin(^(AppsFlyerGodotPlugin *plugin) {
-				start_if(plugin->gate.on_session_ready());
+				start_if(plugin->gate.on_session_ready(UIApplication.sharedApplication.applicationState == UIApplicationStateBackground));
 			});
 		}];
 	}
@@ -244,6 +282,51 @@ public:
 		if (initialized) {
 			AppsFlyerLib.shared.disableSKAdNetwork = p_disabled;
 		}
+	}
+
+	void set_stopped(bool p_stopped) {
+		stopped = p_stopped;
+		if (initialized) {
+			AppsFlyerLib.shared.isStopped = p_stopped;
+		}
+	}
+
+	bool is_stopped() { return stopped; }
+
+	void set_anonymize_user(bool p_enabled) {
+		anonymized = p_enabled;
+		if (initialized) {
+			AppsFlyerLib.shared.anonymizeUser = p_enabled;
+		}
+	}
+
+	void set_consent(bool p_subject_to_gdpr, const Variant &p_data_usage, const Variant &p_ads_personalization, const Variant &p_ad_storage) {
+		consent = [[AppsFlyerConsent alloc] initWithIsUserSubjectToGDPR:@(p_subject_to_gdpr)
+												 hasConsentForDataUsage:to_optional_bool(p_data_usage)
+										hasConsentForAdsPersonalization:to_optional_bool(p_ads_personalization)
+												 hasConsentForAdStorage:to_optional_bool(p_ad_storage)];
+		if (initialized) {
+			[AppsFlyerLib.shared setConsentData:consent];
+		}
+	}
+
+	void enable_tcf_data_collection(bool p_enabled) {
+		tcf_collection = p_enabled;
+		if (initialized) {
+			[AppsFlyerLib.shared enableTCFDataCollection:p_enabled];
+		}
+	}
+
+	void log_ad_revenue(const String &p_monetization_network, int p_mediation_network, const String &p_currency, double p_revenue, const Dictionary &p_params) {
+		ERR_FAIL_COND_MSG(!initialized, "AppsFlyer: call init() before log_ad_revenue().");
+		ERR_FAIL_COND_MSG(p_mediation_network < AppsFlyerAdRevenueMediationNetworkTypeGoogleAdMob || p_mediation_network > AppsFlyerAdRevenueMediationNetworkTypeDirectMonetization,
+				"AppsFlyer: unknown mediation network.");
+		ERR_FAIL_COND_MSG(!std::isfinite(p_revenue), "AppsFlyer: ad revenue must be a finite number.");
+		AFAdRevenueData *data = [[AFAdRevenueData alloc] initWithMonetizationNetwork:to_ns_string(p_monetization_network)
+																   mediationNetwork:(AppsFlyerAdRevenueMediationNetworkType)p_mediation_network
+																currencyIso4217Code:to_ns_string(p_currency)
+																	   eventRevenue:@(p_revenue)];
+		[AppsFlyerLib.shared logAdRevenue:data additionalParameters:p_params.is_empty() ? nil : to_ns_object(p_params)];
 	}
 
 	bool request_tracking_authorization(double p_timeout_sec) {

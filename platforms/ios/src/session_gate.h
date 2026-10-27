@@ -19,7 +19,12 @@ struct SessionGate {
 		return release();
 	}
 
-	bool on_session_ready() {
+	// A readiness report delivered after the app went to the background belongs to the
+	// foreground that just ended; starting on it would also block the next foreground's start.
+	bool on_session_ready(bool p_in_background = false) {
+		if (p_in_background) {
+			return false;
+		}
 		session_ready = true;
 		return release();
 	}
@@ -48,15 +53,11 @@ struct SessionGate {
 	}
 
 	bool begin_consent_retry(uint64_t p_generation) {
-		if (!awaiting_consent || p_generation != consent_generation || !consent_retry_pending) {
+		if (p_generation != consent_generation || !consent_retry_pending) {
 			return false;
 		}
 		consent_retry_pending = false;
 		return true;
-	}
-
-	bool expire_consent_retry(uint64_t p_generation) {
-		return consent_retry_pending && resolve_consent(p_generation);
 	}
 
 	bool resolve_consent(uint64_t p_generation) {

@@ -141,15 +141,16 @@ static void att_sheet_dismissal_does_not_start_a_second_session() {
 	CHECK(!gate.on_session_ready());
 }
 
-static void suppressed_retry_expires_without_activation() {
+static void suppressed_retry_keeps_waiting_until_activation() {
 	SessionGate gate;
 	uint64_t generation = gate.begin_consent();
 	gate.request_start();
 	gate.on_session_ready();
 	CHECK(gate.retry_undetermined_consent(generation));
-	CHECK(gate.expire_consent_retry(generation));
-	CHECK(!gate.begin_consent_retry(generation));
-	CHECK(!gate.expire_consent_retry(generation));
+	CHECK(!gate.on_session_ready());
+	CHECK(!gate.request_start());
+	CHECK(gate.begin_consent_retry(generation));
+	CHECK(gate.resolve_consent(generation));
 }
 
 static void activation_and_fallback_only_prompt_once_and_keep_waiting_for_answer() {
@@ -160,9 +161,27 @@ static void activation_and_fallback_only_prompt_once_and_keep_waiting_for_answer
 	CHECK(gate.retry_undetermined_consent(generation));
 	CHECK(gate.begin_consent_retry(generation));
 	CHECK(!gate.begin_consent_retry(generation));
-	CHECK(!gate.expire_consent_retry(generation));
 	CHECK(!gate.request_start());
 	CHECK(gate.resolve_consent(generation));
+}
+
+static void caller_timeout_cancels_a_pending_retry() {
+	SessionGate gate;
+	uint64_t generation = gate.begin_consent();
+	gate.request_start();
+	gate.on_session_ready();
+	CHECK(gate.retry_undetermined_consent(generation));
+	CHECK(gate.resolve_consent(generation));
+	CHECK(!gate.begin_consent_retry(generation));
+}
+
+static void undetermined_answer_after_timeout_does_not_retry() {
+	SessionGate gate;
+	uint64_t generation = gate.begin_consent();
+	gate.request_start();
+	gate.on_session_ready();
+	CHECK(gate.resolve_consent(generation));
+	CHECK(!gate.retry_undetermined_consent(generation));
 }
 
 static void stale_retry_cannot_prompt_or_release_a_new_request() {
@@ -178,8 +197,28 @@ static void stale_retry_cannot_prompt_or_release_a_new_request() {
 	CHECK(!gate.begin_consent_retry(second));
 	CHECK(gate.retry_undetermined_consent(second));
 	CHECK(!gate.begin_consent_retry(first));
-	CHECK(!gate.expire_consent_retry(first));
-	CHECK(gate.expire_consent_retry(second));
+	CHECK(!gate.resolve_consent(first));
+	CHECK(gate.begin_consent_retry(second));
+	CHECK(gate.resolve_consent(second));
+}
+
+static void readiness_reported_in_background_is_ignored() {
+	SessionGate gate;
+	gate.request_start();
+	CHECK(gate.on_session_ready());
+	gate.on_background();
+	CHECK(!gate.on_session_ready(true));
+	CHECK(gate.on_session_ready());
+}
+
+static void readiness_reported_in_background_does_not_start_when_consent_resolves() {
+	SessionGate gate;
+	uint64_t generation = gate.begin_consent();
+	gate.request_start();
+	gate.on_background();
+	CHECK(!gate.on_session_ready(true));
+	CHECK(!gate.resolve_consent(generation));
+	CHECK(gate.on_session_ready());
 }
 
 int main() {
@@ -197,9 +236,13 @@ int main() {
 	session_ready_again_in_the_same_foreground_does_not_restart();
 	session_ready_after_background_starts_again();
 	att_sheet_dismissal_does_not_start_a_second_session();
-	suppressed_retry_expires_without_activation();
+	suppressed_retry_keeps_waiting_until_activation();
 	activation_and_fallback_only_prompt_once_and_keep_waiting_for_answer();
+	caller_timeout_cancels_a_pending_retry();
+	undetermined_answer_after_timeout_does_not_retry();
 	stale_retry_cannot_prompt_or_release_a_new_request();
+	readiness_reported_in_background_is_ignored();
+	readiness_reported_in_background_does_not_start_when_consent_resolves();
 	if (failures) {
 		std::fprintf(stderr, "%d check(s) failed\n", failures);
 		return 1;

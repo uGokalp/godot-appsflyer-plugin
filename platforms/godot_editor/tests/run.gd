@@ -32,11 +32,17 @@ func _run() -> void:
 	var total := 0
 	var failed := 0
 	for path in SUITES:
-		for method in load(path).new().get_method_list():
+		var script: Script = load(path)
+		if script == null or not script.can_instantiate():
+			failed += 1
+			total += 1
+			print("  FAIL  %s does not load\n        %s" % [path, "\n        ".join(logger.take())])
+			continue
+		for method in script.new().get_method_list():
 			var test_name: String = method.name
 			if not test_name.begins_with("test_"):
 				continue
-			var suite: Object = load(path).new()
+			var suite: Object = script.new()
 			suite.tree = self
 			logger.take()
 			await suite.call(test_name)

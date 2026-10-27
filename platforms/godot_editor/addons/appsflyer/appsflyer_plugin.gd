@@ -8,6 +8,7 @@ var _settings := {
 	"appsflyer/config/att_usage_description": [TYPE_STRING, ""],
 	"appsflyer/config/onelink_domains": [TYPE_PACKED_STRING_ARRAY, PackedStringArray()],
 	"appsflyer/config/skadnetwork_ids": [TYPE_PACKED_STRING_ARRAY, PackedStringArray()],
+	"appsflyer/config/skan_postback_copies": [TYPE_BOOL, true],
 }
 
 var _ios_export_plugin: EditorExportPlugin
