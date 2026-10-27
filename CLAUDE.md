@@ -15,7 +15,7 @@ Read before changing behavior:
 | `platforms/ios/src/session_gate.h` | Pure C++ start/ATT coordinator (no Godot/ObjC). All session-start logic lives here so it can be host-tested |
 | `platforms/ios/tests/session_gate_test.cpp` | Host unit tests for the gate (`platforms/ios/scripts/test.sh`) |
 | `platforms/ios/AppsFlyerGodotPlugin.gdip` | Links `AppsFlyerLib.xcframework` onto the app target, copies the privacy bundle, system frameworks, `-ObjC` |
-| `platforms/ios/scripts/` | `fetch_godot_headers.sh` (4.7.2), `fetch_appsflyer_sdk.sh` (7.0.2, sha256-pinned), `build.sh`, `test.sh` |
+| `platforms/ios/scripts/` | `fetch_godot_headers.sh` (4.7.2), `fetch_appsflyer_sdk.sh` (7.0.2, sha256-pinned), `build.sh`, `test.sh`, `device_test.sh` (automated device checks) |
 | `platforms/godot_editor/addons/appsflyer/` | `appsflyer.gd` (autoload facade), `appsflyer_plugin.gd` (EditorPlugin: settings + autoload + exporter), `ios_export_plugin.gd` (plist + entitlements) |
 | `platforms/godot_editor/tests/` | Headless GDScript tests against a fake native object (`run.gd`) |
 | `platforms/godot_editor/{main.gd,main.tscn,project.godot}` | Demo used for device verification |
@@ -29,6 +29,7 @@ platforms/ios/scripts/build.sh          # bridge debug+release xcframeworks → 
 platforms/ios/scripts/test.sh           # session gate host tests
 godot --headless --path platforms/godot_editor -s res://tests/run.gd   # GDScript suite
 rm -rf platforms/godot_editor/.godot    # after running Godot headless
+platforms/ios/scripts/device_test.sh    # build, sign, wait for the iPhone on USB, run the automated device checks
 ```
 
 Run all three after any change. Toolchain: Godot 4.7.2 (`godot` on PATH, export templates installed), Xcode 26, `scons` only for regenerating headers.

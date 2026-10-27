@@ -16,4 +16,4 @@ scroll_following = true
 [node name="LogEvent" type="Button" parent="."]
 custom_minimum_size = Vector2(0, 96)
 layout_mode = 2
-text = "log_event(af_login)"
+text = "log_event + ad revenue"

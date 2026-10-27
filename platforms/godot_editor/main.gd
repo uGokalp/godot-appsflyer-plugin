@@ -1,6 +1,9 @@
 extends VBoxContainer
 
 const ATT_TIMEOUT_SEC := 60.0
+const SAMPLE_EVENTS_DELAY_SEC := 5.0
+## Set by platforms/ios/scripts/device_test.sh: "" (default) or "stopped".
+const SCENARIO_ENV := "APPSFLYER_DEMO_SCENARIO"
 
 @onready var _output: RichTextLabel = $Output
 
@@ -12,13 +15,27 @@ func _ready() -> void:
 	AppsFlyer.deep_link_received.connect(func(result: Dictionary) -> void: _log("deep_link_received %s" % result))
 	AppsFlyer.att_status_received.connect(func(status: int) -> void: _log("att_status_received %d" % status))
 	AppsFlyer.event_logged.connect(func(event_name: String, success: bool, code: int) -> void: _log("event_logged %s %s %d" % [event_name, success, code]))
-	$LogEvent.pressed.connect(func() -> void: AppsFlyer.log_event("af_login"))
+	$LogEvent.pressed.connect(_log_sample_events)
 
+	var scenario := OS.get_environment(SCENARIO_ENV)
 	AppsFlyer.set_debug(OS.is_debug_build())
+	AppsFlyer.set_consent(true, true, true, true)
+	AppsFlyer.set_stopped(scenario == "stopped")
 	AppsFlyer.init()
 	AppsFlyer.request_tracking_authorization(ATT_TIMEOUT_SEC)
 	AppsFlyer.start()
-	_log("platform=%s att_status=%d appsflyer_id=%s" % [OS.get_name(), AppsFlyer.get_att_status(), AppsFlyer.get_appsflyer_id()])
+	_log("scenario=%s platform=%s att_status=%d stopped=%s appsflyer_id=%s" % [scenario, OS.get_name(), AppsFlyer.get_att_status(), AppsFlyer.is_stopped(), AppsFlyer.get_appsflyer_id()])
+
+	if AppsFlyer.get_att_status() == 0:
+		await AppsFlyer.att_status_received
+	await get_tree().create_timer(SAMPLE_EVENTS_DELAY_SEC).timeout
+	_log_sample_events()
+
+
+func _log_sample_events() -> void:
+	AppsFlyer.log_event("af_login")
+	AppsFlyer.log_ad_revenue("applovin", AppsFlyer.MediationNetwork.APPLOVIN_MAX, "USD", 0.0021, {"ad_type": "rewarded", "country": "US"})
+	_log("sample events sent: af_login, ad revenue applovin 0.0021 USD")
 
 
 func _log(line: String) -> void:
