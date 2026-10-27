@@ -2,8 +2,11 @@ extends VBoxContainer
 
 const ATT_TIMEOUT_SEC := 60.0
 const SAMPLE_EVENTS_DELAY_SEC := 5.0
-## Set by platforms/ios/scripts/device_test.sh: "" (default) or "stopped".
+const LATE_ATT_DELAY_SEC := 5.0
+## Set by platforms/ios/scripts/device_test.sh: "" (default), "stopped", or "late_att" (start
+## first, then ask for tracking).
 const SCENARIO_ENV := "APPSFLYER_DEMO_SCENARIO"
+const ATT_TIMEOUT_ENV := "APPSFLYER_DEMO_ATT_TIMEOUT"
 
 @onready var _output: RichTextLabel = $Output
 
@@ -22,10 +25,16 @@ func _ready() -> void:
 	AppsFlyer.set_consent(true, true, true, true)
 	AppsFlyer.set_stopped(scenario == "stopped")
 	AppsFlyer.init()
-	AppsFlyer.request_tracking_authorization(ATT_TIMEOUT_SEC)
+	var att_timeout := float(OS.get_environment(ATT_TIMEOUT_ENV)) if OS.has_environment(ATT_TIMEOUT_ENV) else ATT_TIMEOUT_SEC
+	if scenario != "late_att":
+		AppsFlyer.request_tracking_authorization(att_timeout)
 	AppsFlyer.start()
-	_log("scenario=%s platform=%s att_status=%d stopped=%s appsflyer_id=%s" % [scenario, OS.get_name(), AppsFlyer.get_att_status(), AppsFlyer.is_stopped(), AppsFlyer.get_appsflyer_id()])
+	_log("scenario=%s platform=%s att_status=%d att_timeout=%s stopped=%s appsflyer_id=%s" % [scenario, OS.get_name(), AppsFlyer.get_att_status(), att_timeout, AppsFlyer.is_stopped(), AppsFlyer.get_appsflyer_id()])
 
+	if scenario == "late_att":
+		await get_tree().create_timer(LATE_ATT_DELAY_SEC).timeout
+		_log("att requested after start")
+		AppsFlyer.request_tracking_authorization(att_timeout)
 	if AppsFlyer.get_att_status() == 0:
 		await AppsFlyer.att_status_received
 	await get_tree().create_timer(SAMPLE_EVENTS_DELAY_SEC).timeout

@@ -23,9 +23,10 @@ v1 for iOS works end to end on a real device (iPhone 15 Pro, iOS 26.6.2, AppsFly
 | Conversion data: organic, and non-organic from a OneLink click | ✅ |
 | Unified deep linking: warm, cold (killed app) and deferred (fresh install, `is_deferred: true`) | ✅ |
 | Release archive: release bridge links, `AppsFlyerLib_Privacy.bundle` is inside the `.app` | ✅ |
+| 0.2.0, guided run (`device_test.sh guided`, 2026-10-27): deny gives one start after the answer; a 10 s timeout starts the session and the later Allow is still reported with no second start; ATT requested after start survives a background/foreground cycle with no new start until the answer; cold OneLink `found` once with one start; deferred OneLink `found` with `is_deferred: true` and Non-organic conversion data | ✅ |
 | 0.2.0, automated run (`device_test.sh`, 2026-10-27): one start after the ATT answer and one per foreground; `consent_data.manual` with all four fields in the launch request; ad revenue posted with network, mediation, revenue, currency and extra params; `set_stopped(true)` sends no launch or event; SKAN and AdAttributionKit postback keys and the privacy bundle `Info.plist` are in the build | ✅ |
 
-Not yet verified on a device: ATT timeout and deny paths, branded (non-`onelink.me`) domains, the suppressed-prompt retry, the ad revenue dashboard report, and whether Apple actually delivers postback copies (items 2, 3, 7, 9 and 12 in the device test plan). Android is not implemented.
+Not yet verified on a device: branded (non-`onelink.me`) domains, the suppressed-prompt retry, the ad revenue dashboard report, and whether Apple actually delivers postback copies (items 7, 9 and 12 in the device test plan). Android is not implemented.
 
 Size: the bridge xcframework is about 0.5 MB for device and simulator together; only the device slice is linked, and the linker strips unused code. The AppsFlyer SDK is the larger addition. Nothing is added to the `.pck`.
 
@@ -146,9 +147,9 @@ The native bridge is checked by exporting the demo and building it with Xcode. T
 
 ### Device test plan
 
-Run these on a real device with a debug build, `set_debug(true)`, and the AppsFlyer dashboard's test device registered. Items 1, 4, 5, 6, 8, 10, 11 and 13 have passed (see Status).
+Run these on a real device with a debug build, `set_debug(true)`, and the AppsFlyer dashboard's test device registered. Items 1–6, 8, 10, 11 and 13 have passed (see Status).
 
-`platforms/ios/scripts/device_test.sh` automates the tap-free part: it builds, exports and signs the demo, waits for the iPhone on USB, then checks plist and entitlements, a fresh install (one start after the ATT answer, conversion data, `af_login`, consent and ad revenue in the requests), a background/foreground cycle, a warm OneLink and `set_stopped(true)`. It reads the dev key from `~/.appsflyer-godot.env` and the team, bundle, app and device ids from `.agents/device.env` (see the script header), and writes a report and redacted logs under `.agents/device-runs/`. `APPSFLYER_DEVICE_REINSTALL=0` keeps the installed app so no ATT tap is needed.
+`platforms/ios/scripts/device_test.sh` automates the tap-free part: it builds, exports and signs the demo, waits for the iPhone on USB, then checks plist and entitlements, a fresh install (one start after the ATT answer, conversion data, `af_login`, consent and ad revenue in the requests), a background/foreground cycle, a warm OneLink and `set_stopped(true)`. It reads the dev key from `~/.appsflyer-godot.env` and the team, bundle, app and device ids from `.agents/device.env` (see the script header), and writes a report and redacted logs under `.agents/device-runs/`. `APPSFLYER_DEVICE_REINSTALL=0` keeps the installed app so no ATT tap is needed. `device_test.sh guided` runs items 1–3, 6 and 8 and tells you (macOS notifications) when to tap; put the OneLink in a note on the phone first. Its ATT phases sign the demo under throwaway bundle ids (`<bundle>.att<MMDDhhmm>.<n>`, created by automatic signing, uninstalled afterwards).
 
 Practical notes from the first device pass:
 
